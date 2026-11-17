@@ -1,0 +1,6 @@
+build/
+private/
+__pycache__/
+*.log
+host/results/*.json
+!host/results/.keep
