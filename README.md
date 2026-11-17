@@ -16,22 +16,9 @@ A custom ECP5 board:
 The board-specific parts are only `gateware/pcbc_bsp.py` and `gateware/pcbc_bsp_io.py`. Porting to another ECP5 board with DDR3 and an RGMII PHY means replacing those two files.
 
 ## Architecture
-```
-            ┌────────────────────────── ECP5-25F, sys 50 MHz ───────────────────────────┐
-            │                                                                           │
- UART  ◄────┤ VexRiscv + BIOS ──┐                                                       │
-            │                   ├── Wishbone ──┬── CSRs (streamer control, counters)    │
-            │  Etherbone ──slice┘              └── LiteDRAM ── DDR3L x16 (100 MHz)      │
-            │      ▲                                                                    │
-            │      │ UDP 1234                                                           │
-            │  ┌───┴─────────────── LiteEth UDP/IP, ARP, ICMP (32-bit) ───────────┐     │
-            │  │                                                                  │     │
-            │  └───▲──────────────────────────────────────────────────────────────┘     │
-            │      │ UDP 6000 → PC:6001                       RGMII 1000M  ▲            │
-            │  UDPStreamer: header (magic, seq, timestamp) + pattern       │            │
-            └──────────────────────────────────────────────────────────────┼────────────┘
-                                                                       RTL8211F
-```
+![ECP5Stream architecture: VexRiscv, CSRs and LiteDRAM on Wishbone; Etherbone and UDPStreamer on the LiteEth UDP/IP core; RGMII to an RTL8211F; PC controls over UDP 1234 and receives on UDP 6001](docs/architecture.svg)
+
+The stream path (teal) runs from `UDPStreamer` through LiteEth to the PHY with no CPU involvement. The PC sets the rate, length and destination over Etherbone, and reads the counters the same way. Orange marks show the register stages added to close timing at 50 MHz.
 
 ## What's in the repo
 | Path | What |
