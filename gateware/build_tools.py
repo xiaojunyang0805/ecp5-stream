@@ -8,7 +8,7 @@ build.log = yosys + the seed table + the chosen seed's nextpnr log + ecppack.
 import os, re, shutil, subprocess
 from concurrent.futures import ThreadPoolExecutor
 
-OSS_CAD = r"C:\oss-cad-suite"
+OSS_CAD = os.environ.get("OSS_CAD_DIR", r"C:\oss-cad-suite")
 
 
 def timing(txt):

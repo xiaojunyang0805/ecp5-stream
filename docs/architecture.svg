@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" role="img" aria-labelledby="t d" font-family="Inter, system-ui, -apple-system, Segoe UI, sans-serif">
   <title id="t">ECP5Stream architecture</title>
-  <desc id="d">Lattice ECP5 SoC: VexRiscv CPU, CSRs and LiteDRAM on a Wishbone bus; Etherbone master behind a register slice; UDPStreamer feeding the LiteEth UDP/IP core through register-sliced ports; RGMII PHY to an RTL8211F; DDR3L off-chip; a PC controls the board over UDP 1234 and receives the stream on UDP 6001.</desc>
+  <desc id="d">Lattice ECP5 SoC: VexRiscv CPU, CSRs and LiteDRAM on a Wishbone bus; Etherbone master behind a register slice; UDPStreamer feeding the LiteEth UDP/IP core directly or through a DDRRecorder that records the stream into DDR3 by DMA and plays it back through register-sliced ports; RGMII PHY to an RTL8211F; DDR3L off-chip; a PC controls the board over UDP 1234 and receives the stream on UDP 6001.</desc>
   <defs>
     <marker id="ad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#0f766e"/></marker>
     <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#6e7781"/></marker>
@@ -14,7 +14,7 @@
   <!-- FPGA boundary -->
   <rect x="20" y="56" width="700" height="432" rx="12" fill="#f6f8fa" stroke="#57606a" stroke-width="1.5"/>
   <text x="38" y="80" font-size="13" font-weight="700" fill="#1f2328">Lattice ECP5 LFE5U-25F</text>
-  <text x="212" y="80" font-size="12" fill="#57606a">sys 50 MHz · 14.1 k LUT (58 %) · timing closed</text>
+  <text x="212" y="80" font-size="12" fill="#57606a">sys 50 MHz · 17.0 k LUT (69 %) · timing closed</text>
 
   <g font-size="12" fill="#1f2328" text-anchor="middle">
     <!-- Row 1: CPU, CSRs, LiteDRAM -->
@@ -53,6 +53,17 @@
     <text x="380" y="251" font-weight="700" fill="#0f766e">UDPStreamer</text>
     <text x="380" y="268" fill="#1f2328" font-size="11">seq · 64-bit timestamp · pattern</text>
   </g>
+  <!-- DDRRecorder -->
+  <rect x="530" y="228" width="170" height="58" rx="8" fill="#e6f4f2" stroke="#0f766e" stroke-width="2"/>
+  <text x="615" y="251" font-size="12" font-weight="700" fill="#0f766e" text-anchor="middle">DDRRecorder</text>
+  <text x="615" y="268" font-size="11" fill="#1f2328" text-anchor="middle">DMA record · replay as UDP</text>
+  <line x1="470" y1="250" x2="530" y2="250" stroke="#0f766e" stroke-width="3" marker-end="url(#ad)"/>
+  <text x="500" y="243" font-size="10" fill="#0f766e" text-anchor="middle">record</text>
+  <line x1="660" y1="228" x2="660" y2="158" stroke="#0f766e" stroke-width="3" marker-start="url(#ad)" marker-end="url(#ad)"/>
+  <text x="668" y="214" font-size="10" fill="#0f766e">DMA</text>
+  <path d="M600 286V304H396" stroke="#0f766e" stroke-width="3" fill="none" marker-end="url(#ad)"/>
+  <text x="560" y="300" font-size="10" fill="#0f766e" text-anchor="middle">replay</text>
+
   <!-- Etherbone to bus through the register slice -->
   <line x1="120" y1="228" x2="120" y2="194" stroke="#6e7781" stroke-width="1.5"/>
   <use href="#reg" x="120" y="212"/>

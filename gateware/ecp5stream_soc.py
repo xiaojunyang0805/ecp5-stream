@@ -8,6 +8,7 @@ Contents:
   * LiteEth: RGMII 1000M, hardware UDP/IP + ARP + ping, 32-bit datapath in sys
   * Etherbone on UDP 1234: the PC reads/writes every CSR over Ethernet (host/ecp5stream.py)
   * UDPStreamer (streamer.py) on UDP src port 6000: line-rate packet source, no CPU in the data path
+  * DDRRecorder (ddr_stream.py): records the stream into DDR3 through LiteDRAM DMA, plays it back as UDP
 """
 import os, sys, argparse
 
@@ -23,11 +24,12 @@ from litex.soc.interconnect.csr import CSRStatus
 import pcbc_bsp
 from build_tools import run_toolchain
 from streamer import UDPStreamer
+from ddr_stream import DDRRecorder
 
 ETH_MAC = 0x02_45_43_50_35_01
 ETHERBONE_PORT = 1234
 STREAM_SRC_PORT = 6000
-VERSION = 1
+VERSION = 2
 
 
 class _Port:
@@ -118,7 +120,18 @@ class ECP5StreamSoC(SoCCore):
 
         port = self.budp.get_port(STREAM_SRC_PORT, dw=32)
         self.comb += port.source.ready.eq(1)               # TX-only port: drop anything sent to it
-        self.streamer = UDPStreamer(port.sink, dst_ip=convert_ip(host_ip), src_port=STREAM_SRC_PORT)
+        from litex.soc.interconnect import stream
+        from liteeth.common import eth_udp_user_description
+        s_ep = stream.Endpoint(eth_udp_user_description(32))
+        self.streamer = UDPStreamer(s_ep, dst_ip=convert_ip(host_ip), src_port=STREAM_SRC_PORT)
+        # DDR3 record / replay: streamer -> DRAM while recording, DRAM -> UDP while playing, else streamer -> UDP
+        self.recorder = DDRRecorder(self.sdram.crossbar.get_port(mode="write", data_width=32),
+                                    self.sdram.crossbar.get_port(mode="read", data_width=32),
+                                    dst_ip=self.streamer._dst_ip.storage, dst_port=self.streamer._dst_port.storage,
+                                    src_port=STREAM_SRC_PORT)
+        self.comb += If(self.recorder.recording, s_ep.connect(self.recorder.sink)
+                     ).Elif(self.recorder.playing, self.recorder.source.connect(port.sink)
+                     ).Else(s_ep.connect(port.sink))
         stalled = Signal()
         self.sync += If(self.streamer.ctrl.fields.reset, stalled.eq(0)).Elif(port.sink.valid & ~port.sink.ready, stalled.eq(1))
         self.comb += err.err.eq(~stalled)

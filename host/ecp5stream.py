@@ -3,6 +3,7 @@
     python ecp5stream.py info                          # ident, version, sys clock, counters (over Etherbone)
     python ecp5stream.py run  --mbps 900 --seconds 10  # stream at an offered rate, verify, report
     python ecp5stream.py sweep --rates 100,300,500,700,900,950 --seconds 5   # rate sweep -> results/*.json
+    python ecp5stream.py record --packets 100000 --mbps 600   # stream -> DDR3 at full fabric rate, replay, verify
     python ecp5stream.py selftest                      # verifier vs a synthetic stream (no board)
 
 Options: --board 192.168.1.50  --host-ip 192.168.1.100 (this PC, as the board must address it)  --words 366
@@ -18,7 +19,7 @@ import argparse, json, os, socket, struct, sys, time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LITEX = r"C:\Users\Lenovo\tools\litex"
+LITEX = os.environ.get("LITEX_DIR", r"C:\Users\Lenovo\tools\litex")   # folder holding the litex + migen checkouts
 CSR_CSV = os.path.join(HERE, "..", "gateware", "build", "stream", "csr.csv")
 MAGIC, K, HDR = 0x45435035, 0x9E3779B9, 4
 STREAM_PORT = 6001
@@ -153,6 +154,48 @@ def run_once(args, c, mbps, seconds):
     return r
 
 
+def record_once(args, c, npkt, mbps):
+    """Record npkt packets into DDR3 with gap 0 (the streamer's maximum: 1 idle cycle per packet), then play them back
+    at `mbps` on the wire and verify every packet. Timestamps in the replay are the recording times, so their spacing
+    shows the recording rate packet by packet."""
+    sys_clk = c.regs.sys_clk.read()
+    words = args.words
+    c.regs.streamer_ctrl.write(0)
+    c.regs.recorder_ctrl.write(0b100)                       # abort anything running
+    c.regs.streamer_dst_ip.write(struct.unpack(">I", socket.inet_aton(args.host_ip))[0])
+    c.regs.streamer_dst_port.write(STREAM_PORT)
+    c.regs.streamer_words.write(words)
+    c.regs.streamer_gap.write(0)
+    c.regs.streamer_count.write(npkt)
+    c.regs.recorder_length.write(npkt * words)
+    c.regs.recorder_words.write(words)
+    c.regs.recorder_gap.write(gap_for(mbps, words, sys_clk))
+    c.regs.streamer_ctrl.write(0b10)
+    c.regs.recorder_ctrl.write(0b001)                       # arm
+    c.regs.streamer_ctrl.write(0b01)                        # go
+    t0 = time.time()
+    while c.regs.recorder_state.read() != 0:
+        if time.time() - t0 > 30:
+            raise SystemExit("recording did not finish in 30 s")
+        time.sleep(0.05)
+    c.regs.streamer_ctrl.write(0)
+    cyc = c.regs.recorder_rec_cycles.read()
+    rec_bps = npkt * words * 32 / (cyc / sys_clk)
+    ver = Verifier(words, 1)                                # replay: check every word of every packet
+    import threading
+    th = threading.Thread(target=receive, args=(args, ver, 120.0, True))
+    th.start(); time.sleep(0.3)
+    c.regs.recorder_ctrl.write(0b010)                       # play
+    th.join()
+    play_cyc = c.regs.recorder_play_cycles.read()
+    r = {"packets_recorded": npkt, "words": words, "bytes": npkt * words * 4, "rec_cycles": cyc,
+         "record_gbps_into_ddr3": rec_bps / 1e9, "play_offered_mbps": mbps,
+         "play_seconds_board": play_cyc / sys_clk, "pc_received": ver.n, "pc_missing": npkt - ver.n,
+         "bad": ver.bad, "lost_seq_gaps": ver.lost, "words_verified_packets": ver.checked}
+    print("  ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}" for k, v in r.items()))
+    return r
+
+
 def show(r):
     keys = ["offered_mbps", "board_sent", "packets", "pc_missing", "lost", "bad", "board_stall_cycles", "payload_mbps",
             "wire_mbps", "board_spacing_cycles_min", "board_spacing_cycles_max", "pc_arrival_spread_us_p99"]
@@ -161,7 +204,8 @@ def show(r):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["info", "run", "sweep", "selftest"])
+    ap.add_argument("action", choices=["info", "run", "sweep", "record", "selftest"])
+    ap.add_argument("--packets", type=int, default=100000, help="record: packets to capture (x words x 4 bytes)")
     ap.add_argument("--board", default="192.168.1.50")
     ap.add_argument("--host-ip", default="192.168.1.100")
     ap.add_argument("--words", type=int, default=366)
@@ -190,11 +234,14 @@ def main():
             print(f"version {c.regs.version.read()}  sys_clk {c.regs.sys_clk.read()} Hz  sent {c.regs.streamer_sent.read()}"
                   f"  stall {c.regs.streamer_stall.read()}")
             return 0
-        rates = [a.mbps] if a.action == "run" else [float(x) for x in a.rates.split(",")]
         out = []
-        for mbps in rates:
-            r = run_once(a, c, mbps, a.seconds)
-            show(r); out.append(r)
+        if a.action == "record":
+            out.append(record_once(a, c, a.packets, a.mbps))
+        else:
+            rates = [a.mbps] if a.action == "run" else [float(x) for x in a.rates.split(",")]
+            for mbps in rates:
+                r = run_once(a, c, mbps, a.seconds)
+                show(r); out.append(r)
         os.makedirs(os.path.join(HERE, "results"), exist_ok=True)
         fn = os.path.join(HERE, "results", time.strftime("%Y%m%d_%H%M%S_") + a.action + ".json")
         json.dump({"ident": ident(c), "runs": out}, open(fn, "w"), indent=1)
